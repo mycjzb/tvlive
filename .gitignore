@@ -1,0 +1,9 @@
+cms-pub.json
+data.db
+*.db
+*.log
+*.pid
+bin/
+segments/
+data/
+logs/

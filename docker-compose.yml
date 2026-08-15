@@ -1,0 +1,27 @@
+# 在含 cms-pub 二进制的目录执行：docker compose up -d --build
+#
+# 默认 host 网络（端口与物理机一致，方便 Cloudflare 回源）。
+# macOS Docker Desktop 不支持 host：删掉 network_mode，改用下方注释的 ports。
+
+services:
+  tvlive:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tvlive:latest
+    container_name: tvlive
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - tvlive-data:/data
+    tmpfs:
+      - /dev/shm/cms-pub:size=1024m,mode=1777
+    environment:
+      TZ: Asia/Shanghai
+    # ports:
+    #   - "8900:8900"
+    #   - "9177:9177"
+    #   - "9188:9188"
+
+volumes:
+  tvlive-data:
