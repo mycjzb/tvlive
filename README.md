@@ -109,6 +109,7 @@ docker restart tvlive
 
 1. 登录后台 → **节目分类**：建分类（卫视、体育…），可填分类 Logo。
 2. **频道列表** → 添加频道：源地址、频道 ID、名称、**频道图标**（`https://...png`）、勾选分类。
+   - 源地址若是 **DASH `.mpd`**，下方会出现「MPD 解密密钥」`KID:KEY`（ClearKey）。明文 MPD 可留空。
 3. 频道要 **运行中** 才会进 VLC 列表。
 4. 页头 **VLC 列表** 可复制 `http://IP:9177/tvlive.m3u8`。
 5. 设置 → **EPG 地址**（可选 XMLTV），写入列表头 `x-tvg-url`。
