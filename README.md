@@ -14,7 +14,13 @@ http://<服务器IP>:9177/tvlive.m3u8
 https://<你的播放域名>/tvlive.m3u8
 ```
 
-默认后台账号：`admin` / `admin888`（装完立刻改密）。
+默认后台登录（装完立刻改密）：
+
+| 项 | 值 |
+| --- | --- |
+| 地址 | `http://<服务器IP>:9188/cms_admin/` |
+| 账号 | `admin` |
+| 密码 | `admin888` |
 
 ---
 
@@ -53,8 +59,6 @@ sudo bash ./install.sh
 ```bash
 systemctl status cms-pub
 journalctl -u cms-pub -f
-cd /opt/tvlive && ./cms-pub -passwd '你的新密码'
-systemctl restart cms-pub
 ```
 
 常用参数（二进制自带）：
@@ -70,8 +74,16 @@ systemctl restart cms-pub
 浏览器：
 
 - 后台：`http://IP:9188/cms_admin/`
+- **默认账号 `admin`，默认密码 `admin888`**（首次登录后立刻改密）
 - VLC：媒体 → 打开网络串流 → `http://IP:9177/tvlive.m3u8`
 - 网页播放：`http://IP:9177/`
+
+改密（明文新密码，进程会 MD5 后入库）：
+
+```bash
+cd /opt/tvlive && ./cms-pub -passwd '你的新密码'
+systemctl restart cms-pub
+```
 
 ---
 
@@ -88,6 +100,8 @@ docker compose up -d --build
 默认 `network_mode: host`（与物理机端口相同）。数据卷：`tvlive-data` → 容器 `/data`（`cms-pub.json`、`data.db`）。切片在 tmpfs `/dev/shm/cms-pub`。
 
 macOS Docker 不支持 host 网络：编辑 `docker-compose.yml`，去掉 `network_mode: host`，打开注释里的 `ports`。
+
+后台同样是 `http://IP:9188/cms_admin/`，默认账号 `admin`、密码 `admin888`。
 
 停止 / 看日志：
 
@@ -107,12 +121,13 @@ docker restart tvlive
 
 ## 4. 后台用法（频道 / 分类 / 图标）
 
-1. 登录后台 → **节目分类**：建分类（卫视、体育…），可填分类 Logo。
-2. **频道列表** → 添加频道：源地址、频道 ID、名称、**频道图标**（`https://...png`）、勾选分类。
+1. 打开 `http://IP:9188/cms_admin/`，账号 `admin`、密码 `admin888`（登录后立刻改密）。
+2. **节目分类**：建分类（卫视、体育…），可填分类 Logo。
+3. **频道列表** → 添加频道：源地址、频道 ID、名称、**频道图标**（`https://...png`）、勾选分类。
    - 源地址若是 **DASH `.mpd`**，下方会出现「MPD 解密密钥」`KID:KEY`（ClearKey）。明文 MPD 可留空。
-3. 频道要 **运行中** 才会进 VLC 列表。
-4. 页头 **VLC 列表** 可复制 `http://IP:9177/tvlive.m3u8`。
-5. 设置 → **EPG 地址**（可选 XMLTV），写入列表头 `x-tvg-url`。
+4. 频道要 **运行中** 才会进 VLC 列表。
+5. 页头 **VLC 列表** 可复制 `http://IP:9177/tvlive.m3u8`。
+6. 设置 → **EPG 地址**（可选 XMLTV），写入列表头 `x-tvg-url`。
 
 列表格式与常见 IPTV 一致：
 
@@ -138,7 +153,7 @@ VLC 左侧按 `group-title` 显示分类；图标来自频道 `tvg-logo`，没�
 
 1. 登录 `http://IP:9188/cms_admin/` → **设置 → 源站 / 端口**
 2. 点快捷端口或手填，保存
-3. 再去 **对外 URL** 填播放域名（见 5.5）
+3. 再去 **对外 URL** 填流域名、tvapp 域名（见 5.4）
 
 下面三种绑法选一种即可。
 
@@ -218,30 +233,36 @@ ingress:
 
 然后 `cloudflared tunnel route dns <TUNNEL_ID> tv.example.com` 与 `cloudflared tunnel run`。
 
-### 5.4 后台填播放域名（三种方案都要）
+### 5.4 后台填流域名 / tvapp 域名（三种方案都要）
 
 **设置 → 对外 URL**：
 
 | 字段 | 填什么 |
 | --- | --- |
-| CDN 域名 | `https://tv.example.com`（预热走这条） |
-| 对外访问前缀 | `https://tv.example.com`（VLC 列表里每条频道的地址） |
+| 流域名 | `https://hs.example.com`（HLS / 预热 / VLC 列表里每条频道） |
+| tvapp 域名 | `https://play.example.com`（网页播放器，回源 9177） |
 
-保存后频道 URL 为 `https://tv.example.com/live/<id>.php`（伪装关闭则 `.m3u8`）。
+保存后频道 URL 为 `https://hs.example.com/live/<id>.php`（伪装关闭则 `.m3u8`）。
 
 列表同时写在源站根路径：
 
 ```text
-https://tv.example.com/tvlive.m3u8
+https://hs.example.com/tvlive.m3u8
 ```
 
-源站已带 CORS 与缓存头（列表约 2 秒、切片 7 天），橙云按源站 `Cache-Control` 即可，一般不用 Page Rule。
+网页播放器：
+
+```text
+https://play.example.com/
+```
+
+源站已带 CORS 与缓存头（列表约 2 秒、切片 7 天），橙云按源站 `Cache-Control` 即可，一般不用 Page Rule。tvapp 域名另做一条 DNS/Tunnel 回源 **9177**，不要和流域名共用 HLS 口。
 
 ### 5.5 验证
 
 ```bash
-curl -I https://tv.example.com/tvlive.m3u8
-curl -I https://tv.example.com/live/<频道ID>.php
+curl -I https://hs.example.com/tvlive.m3u8
+curl -I https://hs.example.com/live/<频道ID>.php
 ```
 
 应看到 `cf-cache-status` 与 CORS。VLC 打开该 https 列表，能看到分类、图标、可播。
@@ -250,19 +271,19 @@ curl -I https://tv.example.com/live/<频道ID>.php
 
 ## 6. 自动预热怎么开
 
-预热 = 新切片先写盘、**暂不进播放列表**，同时对 **CDN 域名** 发 GET，让 Cloudflare 边缘先缓存，再把片放进 m3u8。观众就不会打到冷源。
+预热 = 新切片先写盘、**暂不进播放列表**，同时对 **流域名** 发 GET，让 Cloudflare 边缘先缓存，再把片放进 m3u8。观众就不会打到冷源。
 
 要同时满足：
 
 1. **设置 → 切片 / 预热**
    - 预热延迟（片）≥ 1（默认 3）。延迟 0 = 不等边缘，等于没预热窗口。
 2. **每个频道**「CDN 预热」= 开启（添加频道时可关）。
-3. **CDN 域名** 填 Cloudflare 播放域名（见上一节）。留空则不会对外 GET，预热不生效。
+3. **流域名** 填 Cloudflare 的 HLS 域名（见上一节）。留空则不会对外 GET，预热不生效。
 
 原理简述：切片进列表前，进程对  
 `https://tv.example.com/live/<频道ID>/<文件>.png`（或 `.ts`）发最多 3 次 GET。全局 `prewarm` 默认开；频道开关可单独关掉。
 
-改切片参数或 CDN 域名后，正在运行的频道会按新配置重启。
+改切片参数或流域名后，正在运行的频道会按新配置重启。
 
 ---
 
@@ -275,8 +296,8 @@ curl -I https://tv.example.com/live/<频道ID>.php
 | `cms_port` | 9188 | 后台 |
 | `tvapp_port` | 9177 | tvapp + VLC 列表 |
 | `http_port` | 8900 | HLS nginx（后台「源站 / 端口」可改，保存即热加载） |
-| `play_domain` | 空 | CF 域名，预热用 |
-| `public_base_url` | 空 | 列表/播放前缀 |
+| `play_domain` | 空 | 流域名（HLS / 预热） |
+| `public_base_url` | 空 | tvapp 网页播放器域名 |
 | `epg_url` | 空 | XMLTV，后台设置可改 |
 | `prewarm` | true | 全局预热 |
 | `list_delay` | 3 | 预热窗口（片数） |
@@ -289,8 +310,11 @@ curl -I https://tv.example.com/live/<频道ID>.php
 
 ## 8. 常见问题
 
+**默认账号密码是什么？**  
+账号 `admin`，密码 `admin888`。后台地址 `http://IP:9188/cms_admin/`。装完立刻改密：`./cms-pub -passwd '新密码'`（容器见 §3）。
+
 **VLC 能看到频道但播不了**  
-列表地址是 9177，真正的流在 HLS 端口（默认 8900）或 CF 域名。检查频道是否运行中、源地址能否拉到、`public_base_url` 是否填成观众能访问的地址。橙云打不通时先看端口是否在 CF 白名单（见 §5.1）。
+列表地址是 9177（或 tvapp 域名），真正的流在 HLS 端口（默认 8900）或流域名。检查频道是否运行中、源地址能否拉到、**流域名**是否填成观众能访问的 HLS 地址。橙云打不通时先看端口是否在 CF 白名单（见 §5.1）。
 
 **没有分类**  
 频道要勾选「节目分类」。未勾选的进「未分类」。停用的分类不会出现。
@@ -299,7 +323,7 @@ curl -I https://tv.example.com/live/<频道ID>.php
 频道图标填 `https://` 图片；不填则用分类 Logo。VLC 对部分 PNG/SVG 支持不一，优先小尺寸 PNG。
 
 **预热不生效**  
-CDN 域名必须是 CF 的 https 域名；频道预热开关要开；`list_delay` 不要为 0。
+流域名必须是 CF 的 https 域名；频道预热开关要开；`list_delay` 不要为 0。
 
 **CentOS 跑不起来**  
 换 Ubuntu 22+ / Debian 12，或用本仓库 Docker（debian bookworm）。
