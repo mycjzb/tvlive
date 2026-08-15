@@ -27,12 +27,12 @@ https://<你的播放域名>/tvlive.m3u8
 | 内存 | 建议 ≥ 2 GB；切片目录默认 `/dev/shm/cms-pub`（内存盘） |
 | 磁盘 | 配置与 SQLite 很小；切片走 tmpfs，重启会清空 |
 | systemd | 一键脚本依赖 systemd |
-| 端口 | **8900** HLS 源站（Cloudflare 回源）· **9177** VLC 列表 / tvapp / Tracker · **9188** 管理后台 |
+| 端口 | **HLS** 默认 8900（后台可改成 80/8080 等给 Cloudflare）· **9177** VLC 列表 / tvapp · **9188** 管理后台 |
 | 架构 | 仅 linux/amd64 二进制（容器也要 amd64） |
 
 本机编译的 glibc 版本较高时，**CentOS 7 可能跑不起来**。优先 Ubuntu 22.04 / Debian 12 / Rocky 9。
 
-安全建议：公网只给 Cloudflare 回源 **8900**；**9188 后台不要对全世界开放**（安全组只放你的办公 IP）。9177 若只给局域网 VLC 用，也可限制来源。
+安全建议：公网只给 Cloudflare 回源 **HLS 端口**（或改用 Tunnel 完全不开放）；**9188 后台不要对全世界开放**。9177 若只给局域网 VLC 用，也可限制来源。
 
 ---
 
@@ -128,56 +128,123 @@ VLC 左侧按 `group-title` 显示分类；图标来自频道 `tvg-logo`，没�
 
 ---
 
-## 5. 绑定 Cloudflare 域名
+## 5. Cloudflare 绑定播放域名
 
-目标：观众走 `https://tv.example.com/...`，源站仍是这台机器的 **8900**。
+观众打开 `https://tv.example.com/tvlive.m3u8`，源站是本机内置 nginx（后台 **设置 → 源站 / 端口** 的 HLS 端口，默认 8900）。
 
-### 5.1 DNS
+**DNS A 记录本身不能写端口。** 橙云对外永远是 80/443；回源端口要么改成 CF 白名单，要么用 Origin Rule / Tunnel 指定。
 
-1. Cloudflare 添加站点，把域名 NS 指到 CF。
-2. 添加 **A 记录**：
-   - 名称：`tv`（或 `@`）
-   - IPv4：服务器公网 IP
-   - 代理状态：**已代理（橙云）**
-3. SSL/TLS 建议 **Full**（源站若只开 HTTP 8900，用 **Flexible** 也能通，但不如源站自备证书稳）。
+先在后台改口并保存（nginx 热加载，防火墙会跟）：
 
-### 5.2 源站端口
+1. 登录 `http://IP:9188/cms_admin/` → **设置 → 源站 / 端口**
+2. 点快捷端口或手填，保存
+3. 再去 **对外 URL** 填播放域名（见 5.5）
 
-Cloudflare 橙云对外是 80/443。回源默认打你记录的 IP:**80**。本程序 HLS 在 **8900**，任选其一：
+下面三种绑法选一种即可。
 
-- **推荐**：本机 nginx/防火墙把 `80 → 8900`（或源站监听 80，需 root，改 `cms-pub.json` 的 `http_port`）。
-- 或 Cloudflare **源站规则 / Transform** 把回源端口改成 8900（视你的 CF 套餐而定）。
-- 或用 Cloudflare Spectrum / 灰色云 + 自备 443（本程序 `https_port`）。
+### 5.1 方案 A：A 记录橙云 + 源站用兼容端口（最常见）
 
-安全组：只允许 **Cloudflare IP 段** 访问 8900，避免源站 IP 被扫。
+Cloudflare **已代理（橙云）** 回源 HTTP **只认**这些口：
 
-### 5.3 后台填域名（必须）
+`80` · `8080` · `8880` · `2052` · `2082` · `2086` · `2095`
 
-登录后台 → **设置 → 对外 URL**：
+默认 **8900 不在名单里**，橙云会打不通。把 HLS 端口改成 **8080**（或 80，需 root）。
+
+1. Cloudflare 添加站点，域名 NS 指到 CF。
+2. DNS → 添加记录：
+   - 类型：**A**
+   - 名称：`tv`（完整名 `tv.example.com`）或 `@`（根域）
+   - IPv4：**服务器公网 IP**（不要填端口）
+   - 代理状态：**已代理（橙色云朵）**
+3. SSL/TLS → 加密模式：**Flexible**（源站 HTTP）即可。源站若自己上 443 证书可用 Full。
+4. 云厂商安全组 / 本机防火墙放行该 HLS 端口（建议只放 [Cloudflare IP 段](https://www.cloudflare.com/ips/)）。
+5. 后台「源站 / 端口」选 `8080` 并保存。
+
+验证：
+
+```bash
+curl -I http://服务器IP:8080/tvlive.m3u8
+curl -I https://tv.example.com/tvlive.m3u8
+```
+
+第二条应有 `cf-cache-status` 和 CORS。
+
+### 5.2 方案 B：A 记录橙云 + Origin Rule 指定回源端口
+
+源站继续用 **8900**（或任意口），让 CF 回源时改打这个端口。
+
+1. DNS 仍按 5.1 做 **A + 橙云 + 公网 IP**（记录里仍然没有端口）。
+2. Cloudflare → **规则 → Origin Rules** → 创建规则，例如：
+   - 条件：Hostname 等于 `tv.example.com`
+   - 动作：**Destination Port**（目标端口）= `8900`
+3. SSL/TLS：**Flexible**
+4. 安全组放行 **8900**（仅 CF IP 更稳）
+5. 后台 HLS 端口保持 8900
+
+适合不想改监听口、套餐又支持 Origin Rule 的情况。
+
+灰云（DNS only）时浏览器必须写端口：`http://tv.example.com:8900/tvlive.m3u8`，没有 CF 缓存/HTTPS，只适合临时排障。
+
+### 5.3 方案 C：Cloudflare Tunnel（不开放公网端口）
+
+机器在 NAT 后面、或不想把 80/8080/8900 打到公网时用隧道。CF 边缘连上 `cloudflared`，再转到本机 `127.0.0.1:HLS端口`。
+
+1. 在 [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → Networks → Tunnels → Create，记下 Token。
+2. 源站安装并登录（Ubuntu 示例）：
+
+```bash
+curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+sudo dpkg -i cloudflared.deb
+sudo cloudflared service install <你的TUNNEL_TOKEN>
+```
+
+3. 隧道 Public Hostname：
+   - Subdomain：`tv`　Domain：`example.com`
+   - Type：`HTTP`
+   - URL：`http://127.0.0.1:8900`（**改成后台当前 HLS 端口**，例如改成 8080 就填 `http://127.0.0.1:8080`）
+4. Cloudflare 会自动加 CNAME，**不要再给这个主机名做橙云 A 到源站 IP**（会和隧道抢）。
+5. SSL 用 CF 默认即可。本机安全组可以不开放 HLS 端口。
+
+`~/.cloudflared/config.yml` 手写等价配置：
+
+```yaml
+tunnel: <TUNNEL_ID>
+credentials-file: /root/.cloudflared/<TUNNEL_ID>.json
+ingress:
+  - hostname: tv.example.com
+    service: http://127.0.0.1:8900
+  - service: http_status:404
+```
+
+然后 `cloudflared tunnel route dns <TUNNEL_ID> tv.example.com` 与 `cloudflared tunnel run`。
+
+### 5.4 后台填播放域名（三种方案都要）
+
+**设置 → 对外 URL**：
 
 | 字段 | 填什么 |
 | --- | --- |
-| CDN 域名 | `https://tv.example.com`（预热走这条，必须是 CF 域名） |
-| 对外访问前缀 | `https://tv.example.com`（VLC 列表里每条频道的播放地址） |
+| CDN 域名 | `https://tv.example.com`（预热走这条） |
+| 对外访问前缀 | `https://tv.example.com`（VLC 列表里每条频道的地址） |
 
-保存后列表里的频道 URL 会变成 `https://tv.example.com/live/<id>.php`（或 `.m3u8`）。
+保存后频道 URL 为 `https://tv.example.com/live/<id>.php`（伪装关闭则 `.m3u8`）。
 
-同一份列表也会写到源站根路径，绑 CF 后可直接：
+列表同时写在源站根路径：
 
 ```text
 https://tv.example.com/tvlive.m3u8
 ```
 
-源站已输出 CORS 与缓存头：播放列表约 2 秒，切片 7 天。CF 橙云按源站 `Cache-Control` 缓存即可，一般**不用再加 Page Rule**。
+源站已带 CORS 与缓存头（列表约 2 秒、切片 7 天），橙云按源站 `Cache-Control` 即可，一般不用 Page Rule。
 
-### 5.4 验证
+### 5.5 验证
 
 ```bash
 curl -I https://tv.example.com/tvlive.m3u8
 curl -I https://tv.example.com/live/<频道ID>.php
 ```
 
-应看到 CF 命中头（`cf-cache-status`）以及源站 CORS。VLC 打开该 https 列表，能看到分类、图标、可播。
+应看到 `cf-cache-status` 与 CORS。VLC 打开该 https 列表，能看到分类、图标、可播。
 
 ---
 
@@ -207,7 +274,7 @@ curl -I https://tv.example.com/live/<频道ID>.php
 | --- | --- | --- |
 | `cms_port` | 9188 | 后台 |
 | `tvapp_port` | 9177 | tvapp + VLC 列表 |
-| `http_port` | 8900 | HLS nginx |
+| `http_port` | 8900 | HLS nginx（后台「源站 / 端口」可改，保存即热加载） |
 | `play_domain` | 空 | CF 域名，预热用 |
 | `public_base_url` | 空 | 列表/播放前缀 |
 | `epg_url` | 空 | XMLTV，后台设置可改 |
@@ -223,7 +290,7 @@ curl -I https://tv.example.com/live/<频道ID>.php
 ## 8. 常见问题
 
 **VLC 能看到频道但播不了**  
-列表地址是 9177，真正的流在 8900 或 CF 域名。检查频道是否运行中、源地址能否拉到、`public_base_url` 是否填成观众能访问的地址。
+列表地址是 9177，真正的流在 HLS 端口（默认 8900）或 CF 域名。检查频道是否运行中、源地址能否拉到、`public_base_url` 是否填成观众能访问的地址。橙云打不通时先看端口是否在 CF 白名单（见 §5.1）。
 
 **没有分类**  
 频道要勾选「节目分类」。未勾选的进「未分类」。停用的分类不会出现。
